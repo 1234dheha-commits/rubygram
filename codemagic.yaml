@@ -162,6 +162,14 @@ workflows:
           echo "Make.py exit code: $rc"
           # Always preserve last 8000 lines of build log for artifact, even on success
           tail -n 8000 build/logs/make-build.log > build/logs/make-build.tail.log || true
+          # On failure, also save the genrule output dirs for ffmpeg/td which often hide the real error
+          if [ "$rc" != "0" ]; then
+            mkdir -p build/logs/genrule-stderr
+            find /private/var/tmp/_bazel_builder -name "stderr" -path "*libffmpeg_build*" -exec cp {} build/logs/genrule-stderr/ffmpeg.stderr \; 2>/dev/null || true
+            find /private/var/tmp/_bazel_builder -name "stderr" -path "*td_build*" -exec cp {} build/logs/genrule-stderr/td.stderr \; 2>/dev/null || true
+            find /private/var/tmp/_bazel_builder -name "stdout" -path "*libffmpeg_build*" -exec cp {} build/logs/genrule-stderr/ffmpeg.stdout \; 2>/dev/null || true
+            ls -la build/logs/genrule-stderr/ 2>/dev/null || true
+          fi
           exit $rc
       - name: Collect IPA artifact
         script: |
