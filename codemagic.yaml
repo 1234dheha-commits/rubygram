@@ -88,13 +88,13 @@ workflows:
         script: |
           mkdir -p build-system/rubygram-codesigning/profiles
           mkdir -p build-system/rubygram-codesigning/certs
-          # Codemagic puts profiles in $HOME/Library/MobileDevice/Provisioning Profiles
-          PROFILES_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
-          ls -la "$PROFILES_DIR" || true
-          # We need to map fetched profiles to expected filenames: Telegram, Share, Intents, NotificationContent, NotificationService, BroadcastUpload, Widget, WatchApp, WatchExtension
+          # Codemagic CLI saves profiles under Xcode's UserData path, not MobileDevice
           python3 <<'PYEOF'
           import os, glob, plistlib, subprocess, shutil
-          src = os.path.expanduser("~/Library/MobileDevice/Provisioning Profiles")
+          candidate_dirs = [
+              os.path.expanduser("~/Library/Developer/Xcode/UserData/Provisioning Profiles"),
+              os.path.expanduser("~/Library/MobileDevice/Provisioning Profiles"),
+          ]
           dst = "build-system/rubygram-codesigning/profiles"
           mapping = {
               "recode.rubygram32": "Telegram.mobileprovision",
@@ -107,19 +107,25 @@ workflows:
               "recode.rubygram32.watchkitapp": "WatchApp.mobileprovision",
               "recode.rubygram32.watchkitapp.watchkitextension": "WatchExtension.mobileprovision",
           }
-          for f in glob.glob(os.path.join(src, "*.mobileprovision")):
+          files = []
+          for d in candidate_dirs:
+              if os.path.isdir(d):
+                  print(f"scanning {d}")
+                  files += glob.glob(os.path.join(d, "*.mobileprovision"))
+                  files += glob.glob(os.path.join(d, "*.provisionprofile"))
+          for f in files:
               try:
                   proc = subprocess.run(["security", "cms", "-D", "-i", f], capture_output=True, check=True)
                   pl = plistlib.loads(proc.stdout)
                   entitlements = pl.get("Entitlements", {})
                   app_id_prefix = entitlements.get("application-identifier", "")
-                  # format: TEAMID.bundle.id
                   parts = app_id_prefix.split(".", 1)
                   bid = parts[1] if len(parts) == 2 else ""
                   if bid in mapping:
                       out = os.path.join(dst, mapping[bid])
                       shutil.copy(f, out)
-                      print(f"Mapped {bid} -> {mapping[bid]}")
+                      aps = entitlements.get("aps-environment", "(none)")
+                      print(f"Mapped {bid} -> {mapping[bid]}  aps-environment={aps}")
               except Exception as e:
                   print(f"skip {f}: {e}")
           PYEOF
