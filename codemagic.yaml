@@ -52,6 +52,24 @@ workflows:
         script: |
           # Xcode 26 ships Metal as a downloadable component; Telegram shaders need it.
           xcodebuild -downloadComponent MetalToolchain 2>&1 || echo "WARN: MetalToolchain download returned non-zero"
+      - name: Hide ccache from CMake
+        script: |
+          # TDLib's CMake auto-detects ccache via find_program and sets it as compiler
+          # launcher. Bazel's sandbox PATH is /usr/bin:/bin only, so the ccache binary
+          # at /opt/homebrew/bin is invisible to make[] -> Error 127.
+          # Remove ccache from every PATH location we can find so CMake doesn't see it.
+          for p in /opt/homebrew/bin/ccache /usr/local/bin/ccache /opt/local/bin/ccache; do
+            if [ -e "$p" ]; then
+              echo "Removing $p"
+              sudo rm -f "$p" 2>/dev/null || rm -f "$p" 2>/dev/null || true
+            fi
+          done
+          # Verify
+          if which ccache 2>/dev/null; then
+            echo "WARN: ccache still found at $(which ccache)"
+          else
+            echo "OK: ccache not in PATH"
+          fi
       - name: Initialize keychain
         script: |
           keychain initialize
