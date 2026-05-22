@@ -20,6 +20,10 @@ workflows:
           brew install bazelisk xcodegen
           which bazel || ln -sf "$(brew --prefix)/bin/bazelisk" "$(brew --prefix)/bin/bazel"
           python3 -m pip install --user --upgrade pip
+      - name: Install Metal Toolchain
+        script: |
+          # Xcode 26 ships Metal as a downloadable component; Telegram shaders need it.
+          xcodebuild -downloadComponent MetalToolchain 2>&1 || echo "WARN: MetalToolchain download returned non-zero"
       - name: Initialize keychain
         script: |
           keychain initialize
@@ -183,6 +187,9 @@ workflows:
           brew install bazelisk xcodegen
           which bazel || ln -sf "$(brew --prefix)/bin/bazelisk" "$(brew --prefix)/bin/bazel"
           python3 -m pip install --user --upgrade pip
+      - name: Install Metal Toolchain
+        script: |
+          xcodebuild -downloadComponent MetalToolchain 2>&1 || echo "WARN: MetalToolchain download returned non-zero"
       - name: Initialize keychain
         script: |
           keychain initialize
