@@ -45,6 +45,33 @@ workflows:
       - name: Generate signing key
         script: |
           openssl genrsa -out /tmp/dev_key.pem 2048
+      - name: Delete stale provisioning profiles for our bundles
+        script: |
+          # Profiles cached before we enabled aps-environment / app-groups won't include them;
+          # delete them so fetch-signing-files regenerates with current capabilities.
+          set +e
+          app-store-connect profiles list --json > /tmp/profiles.json 2>/dev/null
+          python3 <<'PYEOF'
+          import json, subprocess
+          try:
+              profiles = json.load(open('/tmp/profiles.json'))
+          except Exception:
+              profiles = []
+          # Match by bundleId attribute; the relationship is included in `included` if requested,
+          # but we just delete any whose name contains our prefix.
+          targets = []
+          for p in profiles:
+              attrs = p.get('attributes', {}) if isinstance(p, dict) else {}
+              name = attrs.get('name', '')
+              if 'recode.rubygram32' in name or 'Rubygram' in name:
+                  pid = p.get('id')
+                  if pid:
+                      targets.append((pid, name))
+          for pid, name in targets:
+              print(f"Deleting profile {name} ({pid})")
+              subprocess.run(['app-store-connect', 'profiles', 'delete', pid, '--ignore-not-found'])
+          PYEOF
+          exit 0
       - name: Fetch signing files for main app + extensions
         script: |
           set -e
@@ -177,6 +204,29 @@ workflows:
       - name: Generate distribution key
         script: |
           openssl genrsa -out /tmp/dist_key.pem 2048
+      - name: Delete stale provisioning profiles for our bundles
+        script: |
+          set +e
+          app-store-connect profiles list --json > /tmp/profiles.json 2>/dev/null
+          python3 <<'PYEOF'
+          import json, subprocess
+          try:
+              profiles = json.load(open('/tmp/profiles.json'))
+          except Exception:
+              profiles = []
+          targets = []
+          for p in profiles:
+              attrs = p.get('attributes', {}) if isinstance(p, dict) else {}
+              name = attrs.get('name', '')
+              if 'recode.rubygram32' in name or 'Rubygram' in name:
+                  pid = p.get('id')
+                  if pid:
+                      targets.append((pid, name))
+          for pid, name in targets:
+              print(f"Deleting profile {name} ({pid})")
+              subprocess.run(['app-store-connect', 'profiles', 'delete', pid, '--ignore-not-found'])
+          PYEOF
+          exit 0
       - name: Fetch App Store signing files for main app + extensions
         script: |
           set -e
