@@ -15,6 +15,34 @@ workflows:
       - name: Checkout submodules
         script: |
           git submodule update --init --recursive --depth=1
+      - name: Ensure shell scripts are executable
+        script: |
+          # Windows git doesn't preserve the +x bit; scan for shebangs and fix any
+          # tracked file the build will try to invoke as a program.
+          set +e
+          chmod +x submodules/ffmpeg/Sources/FFMpeg/build-ffmpeg-bazel.sh \
+                   submodules/ffmpeg/Sources/FFMpeg/pkg-config \
+                   submodules/ffmpeg/Sources/FFMpeg/gas-preprocessor.pl \
+                   submodules/ffmpeg/Sources/FFMpeg/ffmpeg-7.1.1/configure \
+                   third-party/td/build-td-bazel.sh \
+                   third-party/td/macos-cleanup.sh \
+                   third-party/yasm/yasm-1.3.0/configure \
+                   third-party/yasm/yasm-1.3.0/config/config.guess \
+                   third-party/yasm/yasm-1.3.0/config/config.sub \
+                   build-system/prepare-build-variables-Telegram.sh \
+                   build-system/copy-provisioning-profiles-Telegram.sh \
+                   build-system/generate-xcode-project.sh \
+                   build-system/prepare-build.sh \
+                   build-system/verify.sh 2>/dev/null || true
+          # And every shebang file in the repo for safety
+          find . -type f -not -path "./.git/*" \( -name "*.sh" -o -name "*.pl" -o -name "*.py" -o -name "configure" -o -name "config.guess" -o -name "config.sub" -o -name "pkg-config" \) -exec chmod +x {} + 2>/dev/null || true
+          # Catch anything missed: any tracked file starting with #!
+          find . -type f -not -path "./.git/*" -size +1c -size -16384c | while read f; do
+            if head -c 2 "$f" 2>/dev/null | grep -q "^#!"; then
+              chmod +x "$f" 2>/dev/null
+            fi
+          done
+          echo "Done."
       - name: Install build dependencies
         script: |
           brew install bazelisk xcodegen pkg-config yasm nasm cmake
@@ -199,6 +227,34 @@ workflows:
       - name: Checkout submodules
         script: |
           git submodule update --init --recursive --depth=1
+      - name: Ensure shell scripts are executable
+        script: |
+          # Windows git doesn't preserve the +x bit; scan for shebangs and fix any
+          # tracked file the build will try to invoke as a program.
+          set +e
+          chmod +x submodules/ffmpeg/Sources/FFMpeg/build-ffmpeg-bazel.sh \
+                   submodules/ffmpeg/Sources/FFMpeg/pkg-config \
+                   submodules/ffmpeg/Sources/FFMpeg/gas-preprocessor.pl \
+                   submodules/ffmpeg/Sources/FFMpeg/ffmpeg-7.1.1/configure \
+                   third-party/td/build-td-bazel.sh \
+                   third-party/td/macos-cleanup.sh \
+                   third-party/yasm/yasm-1.3.0/configure \
+                   third-party/yasm/yasm-1.3.0/config/config.guess \
+                   third-party/yasm/yasm-1.3.0/config/config.sub \
+                   build-system/prepare-build-variables-Telegram.sh \
+                   build-system/copy-provisioning-profiles-Telegram.sh \
+                   build-system/generate-xcode-project.sh \
+                   build-system/prepare-build.sh \
+                   build-system/verify.sh 2>/dev/null || true
+          # And every shebang file in the repo for safety
+          find . -type f -not -path "./.git/*" \( -name "*.sh" -o -name "*.pl" -o -name "*.py" -o -name "configure" -o -name "config.guess" -o -name "config.sub" -o -name "pkg-config" \) -exec chmod +x {} + 2>/dev/null || true
+          # Catch anything missed: any tracked file starting with #!
+          find . -type f -not -path "./.git/*" -size +1c -size -16384c | while read f; do
+            if head -c 2 "$f" 2>/dev/null | grep -q "^#!"; then
+              chmod +x "$f" 2>/dev/null
+            fi
+          done
+          echo "Done."
       - name: Install build dependencies
         script: |
           brew install bazelisk xcodegen pkg-config yasm nasm cmake
