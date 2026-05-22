@@ -146,6 +146,8 @@ workflows:
       - name: Build IPA via Make.py
         script: |
           export BUILD_NUMBER=$(date +%s)
+          mkdir -p build/logs
+          set +e
           python3 build-system/Make/Make.py \
             --cacheDir="$BAZEL_CACHE_DIR" \
             --overrideXcodeVersion \
@@ -154,7 +156,13 @@ workflows:
             --configurationPath="$CONFIG_PATH" \
             --codesigningInformationPath="build-system/rubygram-codesigning" \
             --buildNumber="$BUILD_NUMBER" \
-            --configuration=release_arm64
+            --configuration=release_arm64 \
+            2>&1 | tee build/logs/make-build.log
+          rc=${PIPESTATUS[0]}
+          echo "Make.py exit code: $rc"
+          # Always preserve last 8000 lines of build log for artifact, even on success
+          tail -n 8000 build/logs/make-build.log > build/logs/make-build.tail.log || true
+          exit $rc
       - name: Collect IPA artifact
         script: |
           mkdir -p build/ipa
@@ -164,6 +172,7 @@ workflows:
           ls -la build/ipa
     artifacts:
       - build/ipa/*.ipa
+      - build/logs/*.log
       - /tmp/xcodebuild_logs/*.log
 
   ios-appstore:
@@ -290,6 +299,8 @@ workflows:
       - name: Build IPA via Make.py
         script: |
           export BUILD_NUMBER=$(date +%s)
+          mkdir -p build/logs
+          set +e
           python3 build-system/Make/Make.py \
             --cacheDir="$BAZEL_CACHE_DIR" \
             --overrideXcodeVersion \
@@ -298,7 +309,13 @@ workflows:
             --configurationPath="$CONFIG_PATH" \
             --codesigningInformationPath="build-system/rubygram-codesigning" \
             --buildNumber="$BUILD_NUMBER" \
-            --configuration=release_arm64
+            --configuration=release_arm64 \
+            2>&1 | tee build/logs/make-build.log
+          rc=${PIPESTATUS[0]}
+          echo "Make.py exit code: $rc"
+          # Always preserve last 8000 lines of build log for artifact, even on success
+          tail -n 8000 build/logs/make-build.log > build/logs/make-build.tail.log || true
+          exit $rc
       - name: Collect and upload IPA
         script: |
           mkdir -p build/ipa
@@ -311,4 +328,5 @@ workflows:
             --max-build-processing-wait 20 || echo "Upload skipped — App Store Connect record may not exist yet"
     artifacts:
       - build/ipa/*.ipa
+      - build/logs/*.log
       - /tmp/xcodebuild_logs/*.log
