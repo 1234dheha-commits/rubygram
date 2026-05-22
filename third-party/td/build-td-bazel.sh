@@ -19,10 +19,14 @@ options="$options -DIOS_DEPLOYMENT_TARGET=13.0"
 
 cd "$BUILD_DIR"
 
+# Rubygram: disable ccache — Codemagic has it in /opt/homebrew/bin which is outside
+# bazel's sandbox PATH, so cmake "finds" it then make fails with "ccache: command not found".
+DISABLE_CCACHE_FLAGS="-DCMAKE_C_COMPILER_LAUNCHER= -DCMAKE_CXX_COMPILER_LAUNCHER= -DCMAKE_DISABLE_FIND_PACKAGE_CCache=TRUE"
+
 # Generate source files
 mkdir native-build
 cd native-build
-cmake -DTD_GENERATE_SOURCE_FILES=ON ../td
+cmake $DISABLE_CCACHE_FLAGS -DTD_GENERATE_SOURCE_FILES=ON ../td
 cmake --build . -- -j$(sysctl -n hw.ncpu)
 cd ..
 
@@ -48,5 +52,5 @@ echo "set(CMAKE_SYSTEM_NAME Darwin)" >> toolchain.cmake
 echo "set(CMAKE_SYSTEM_PROCESSOR aarch64)" >> toolchain.cmake
 echo "set(CMAKE_C_COMPILER $(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang)" >> toolchain.cmake
 
-cmake -G"Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=toolchain.cmake -DCMAKE_OSX_SYSROOT=${IOS_SYSROOT[0]} ../td $options
+cmake -G"Unix Makefiles" $DISABLE_CCACHE_FLAGS -DCMAKE_TOOLCHAIN_FILE=toolchain.cmake -DCMAKE_OSX_SYSROOT=${IOS_SYSROOT[0]} ../td $options
 make tde2e -j$(sysctl -n hw.ncpu)
