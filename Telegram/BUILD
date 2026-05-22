@@ -546,11 +546,11 @@ aps_fragment = "" if telegram_aps_environment == "" else """
 <string>{telegram_aps_environment}</string>
 """.format(telegram_aps_environment=telegram_aps_environment)
 
+# MARK: Rubygram — temporarily drop com.apple.security.application-groups so we don't
+# need to link an App Group to each bundle in Developer Portal before first build.
+# To restore full IPC between app + extensions, link group.recode.rubygram32 to
+# all bundles in Developer Portal and put the original fragment back.
 app_groups_fragment = """
-    <key>com.apple.security.application-groups</key>
-    <array>
-        <string>group.{telegram_bundle_id}</string>
-    </array>
     <key>application-identifier</key>
     <string>{telegram_team_id}.{telegram_bundle_id}</string>
 """.format(
