@@ -111,6 +111,8 @@ workflows:
           export BUILD_NUMBER=$(date +%s)
           python3 build-system/Make/Make.py \
             --cacheDir="$BAZEL_CACHE_DIR" \
+            --overrideXcodeVersion \
+            --overrideBazelVersion \
             build \
             --configurationPath="$CONFIG_PATH" \
             --codesigningInformationPath="build-system/rubygram-codesigning" \
@@ -227,6 +229,8 @@ workflows:
           export BUILD_NUMBER=$(date +%s)
           python3 build-system/Make/Make.py \
             --cacheDir="$BAZEL_CACHE_DIR" \
+            --overrideXcodeVersion \
+            --overrideBazelVersion \
             build \
             --configurationPath="$CONFIG_PATH" \
             --codesigningInformationPath="build-system/rubygram-codesigning" \
