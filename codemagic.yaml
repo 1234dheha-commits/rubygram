@@ -1,0 +1,247 @@
+workflows:
+  ios-release:
+    name: Rubygram Development IPA for Sideloadly
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: AppStoreConnect
+    environment:
+      vars:
+        BUNDLE_ID: "recode.rubygram32"
+        CONFIG_PATH: "build-system/rubygram-dev-configuration.json"
+        BAZEL_CACHE_DIR: "/tmp/rubygram-bazel-cache"
+      xcode: latest
+    scripts:
+      - name: Checkout submodules
+        script: |
+          git submodule update --init --recursive --depth=1
+      - name: Install build dependencies
+        script: |
+          brew install bazelisk xcodegen
+          which bazel || ln -sf "$(brew --prefix)/bin/bazelisk" "$(brew --prefix)/bin/bazel"
+          python3 -m pip install --user --upgrade pip
+      - name: Initialize keychain
+        script: |
+          keychain initialize
+      - name: Revoke existing iOS Development certificates
+        script: |
+          set +e
+          app-store-connect certificates list --type IOS_DEVELOPMENT --json > /tmp/dev_certs.json 2>/dev/null
+          if [ -s /tmp/dev_certs.json ]; then
+            python3 -c "
+          import json, subprocess, sys
+          try:
+              data = json.load(open('/tmp/dev_certs.json'))
+          except Exception as e:
+              print(f'no parse: {e}'); sys.exit(0)
+          for c in data:
+              cid = c.get('id') if isinstance(c, dict) else None
+              if cid:
+                  print(f'Deleting {cid}')
+                  subprocess.run(['app-store-connect', 'certificates', 'delete', cid, '--ignore-not-found'])
+          "
+          fi
+          exit 0
+      - name: Generate signing key
+        script: |
+          openssl genrsa -out /tmp/dev_key.pem 2048
+      - name: Fetch signing files for main app + extensions
+        script: |
+          set -e
+          for SUFFIX in "" ".SiriIntents" ".Share" ".NotificationContent" ".NotificationService" ".BroadcastUpload" ".Widget" ".watchkitapp" ".watchkitapp.watchkitextension"; do
+            app-store-connect fetch-signing-files "${BUNDLE_ID}${SUFFIX}" \
+              --type IOS_APP_DEVELOPMENT \
+              --certificate-key=@file:/tmp/dev_key.pem \
+              --create || echo "WARN: could not fetch ${BUNDLE_ID}${SUFFIX}"
+          done
+      - name: Add certificates to keychain
+        script: |
+          keychain add-certificates
+      - name: Stage profiles for Make.py
+        script: |
+          mkdir -p build-system/rubygram-codesigning/profiles
+          mkdir -p build-system/rubygram-codesigning/certs
+          # Codemagic puts profiles in $HOME/Library/MobileDevice/Provisioning Profiles
+          PROFILES_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+          ls -la "$PROFILES_DIR" || true
+          # We need to map fetched profiles to expected filenames: Telegram, Share, Intents, NotificationContent, NotificationService, BroadcastUpload, Widget, WatchApp, WatchExtension
+          python3 <<'PYEOF'
+          import os, glob, plistlib, subprocess, shutil
+          src = os.path.expanduser("~/Library/MobileDevice/Provisioning Profiles")
+          dst = "build-system/rubygram-codesigning/profiles"
+          mapping = {
+              "recode.rubygram32": "Telegram.mobileprovision",
+              "recode.rubygram32.Share": "Share.mobileprovision",
+              "recode.rubygram32.SiriIntents": "Intents.mobileprovision",
+              "recode.rubygram32.NotificationContent": "NotificationContent.mobileprovision",
+              "recode.rubygram32.NotificationService": "NotificationService.mobileprovision",
+              "recode.rubygram32.BroadcastUpload": "BroadcastUpload.mobileprovision",
+              "recode.rubygram32.Widget": "Widget.mobileprovision",
+              "recode.rubygram32.watchkitapp": "WatchApp.mobileprovision",
+              "recode.rubygram32.watchkitapp.watchkitextension": "WatchExtension.mobileprovision",
+          }
+          for f in glob.glob(os.path.join(src, "*.mobileprovision")):
+              try:
+                  proc = subprocess.run(["security", "cms", "-D", "-i", f], capture_output=True, check=True)
+                  pl = plistlib.loads(proc.stdout)
+                  entitlements = pl.get("Entitlements", {})
+                  app_id_prefix = entitlements.get("application-identifier", "")
+                  # format: TEAMID.bundle.id
+                  parts = app_id_prefix.split(".", 1)
+                  bid = parts[1] if len(parts) == 2 else ""
+                  if bid in mapping:
+                      out = os.path.join(dst, mapping[bid])
+                      shutil.copy(f, out)
+                      print(f"Mapped {bid} -> {mapping[bid]}")
+              except Exception as e:
+                  print(f"skip {f}: {e}")
+          PYEOF
+          ls -la build-system/rubygram-codesigning/profiles
+      - name: Export distribution cert as p12
+        script: |
+          # Export the cert that Codemagic just added to keychain into a SelfSigned.p12 file for Make.py
+          security find-identity -p codesigning -v
+          # NOTE: Codemagic doesn't expose the .p12 directly; we use the keychain identity instead.
+          # Make.py expects certs/SelfSigned.p12 — extract from keychain:
+          KEYCHAIN_PATH="$HOME/Library/Keychains/build.keychain-db"
+          security export -k "$KEYCHAIN_PATH" -t identities -f pkcs12 -P "" -o build-system/rubygram-codesigning/certs/SelfSigned.p12 || echo "WARN: export may need manual step"
+          ls -la build-system/rubygram-codesigning/certs
+      - name: Build IPA via Make.py
+        script: |
+          export BUILD_NUMBER=$(date +%s)
+          python3 build-system/Make/Make.py \
+            --cacheDir="$BAZEL_CACHE_DIR" \
+            build \
+            --configurationPath="$CONFIG_PATH" \
+            --codesigningInformationPath="build-system/rubygram-codesigning" \
+            --buildNumber="$BUILD_NUMBER" \
+            --configuration=release_arm64
+      - name: Collect IPA artifact
+        script: |
+          mkdir -p build/ipa
+          for f in bazel-out/applebin_ios-ios_arm*-opt-ST-*/bin/Telegram/Telegram.ipa; do
+            cp "$f" build/ipa/Rubygram-dev.ipa
+          done
+          ls -la build/ipa
+    artifacts:
+      - build/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+
+  ios-appstore:
+    name: Rubygram TestFlight / App Store
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: AppStoreConnect
+    environment:
+      vars:
+        BUNDLE_ID: "recode.rubygram32"
+        CONFIG_PATH: "build-system/rubygram-configuration.json"
+        BAZEL_CACHE_DIR: "/tmp/rubygram-bazel-cache"
+      xcode: latest
+    scripts:
+      - name: Checkout submodules
+        script: |
+          git submodule update --init --recursive --depth=1
+      - name: Install build dependencies
+        script: |
+          brew install bazelisk xcodegen
+          which bazel || ln -sf "$(brew --prefix)/bin/bazelisk" "$(brew --prefix)/bin/bazel"
+          python3 -m pip install --user --upgrade pip
+      - name: Initialize keychain
+        script: |
+          keychain initialize
+      - name: Revoke existing distribution certificates
+        script: |
+          set +e
+          for ctype in IOS_DISTRIBUTION DISTRIBUTION; do
+            app-store-connect certificates list --type $ctype --json > /tmp/certs_$ctype.json 2>/dev/null
+            if [ -s /tmp/certs_$ctype.json ]; then
+              python3 -c "
+          import json, subprocess, sys
+          try:
+              data = json.load(open('/tmp/certs_$ctype.json'))
+          except Exception as e:
+              print(f'no parse: {e}'); sys.exit(0)
+          for c in data:
+              cid = c.get('id') if isinstance(c, dict) else None
+              if cid:
+                  print(f'Deleting {cid}')
+                  subprocess.run(['app-store-connect', 'certificates', 'delete', cid, '--ignore-not-found'])
+          "
+            fi
+          done
+          exit 0
+      - name: Generate distribution key
+        script: |
+          openssl genrsa -out /tmp/dist_key.pem 2048
+      - name: Fetch App Store signing files for main app + extensions
+        script: |
+          set -e
+          for SUFFIX in "" ".SiriIntents" ".Share" ".NotificationContent" ".NotificationService" ".BroadcastUpload" ".Widget" ".watchkitapp" ".watchkitapp.watchkitextension"; do
+            app-store-connect fetch-signing-files "${BUNDLE_ID}${SUFFIX}" \
+              --type IOS_APP_STORE \
+              --certificate-key=@file:/tmp/dist_key.pem \
+              --create || echo "WARN: could not fetch ${BUNDLE_ID}${SUFFIX}"
+          done
+      - name: Add certificates to keychain
+        script: |
+          keychain add-certificates
+      - name: Stage profiles for Make.py
+        script: |
+          mkdir -p build-system/rubygram-codesigning/profiles
+          mkdir -p build-system/rubygram-codesigning/certs
+          python3 <<'PYEOF'
+          import os, glob, plistlib, subprocess, shutil
+          src = os.path.expanduser("~/Library/MobileDevice/Provisioning Profiles")
+          dst = "build-system/rubygram-codesigning/profiles"
+          mapping = {
+              "recode.rubygram32": "Telegram.mobileprovision",
+              "recode.rubygram32.Share": "Share.mobileprovision",
+              "recode.rubygram32.SiriIntents": "Intents.mobileprovision",
+              "recode.rubygram32.NotificationContent": "NotificationContent.mobileprovision",
+              "recode.rubygram32.NotificationService": "NotificationService.mobileprovision",
+              "recode.rubygram32.BroadcastUpload": "BroadcastUpload.mobileprovision",
+              "recode.rubygram32.Widget": "Widget.mobileprovision",
+              "recode.rubygram32.watchkitapp": "WatchApp.mobileprovision",
+              "recode.rubygram32.watchkitapp.watchkitextension": "WatchExtension.mobileprovision",
+          }
+          for f in glob.glob(os.path.join(src, "*.mobileprovision")):
+              try:
+                  proc = subprocess.run(["security", "cms", "-D", "-i", f], capture_output=True, check=True)
+                  pl = plistlib.loads(proc.stdout)
+                  entitlements = pl.get("Entitlements", {})
+                  app_id_prefix = entitlements.get("application-identifier", "")
+                  parts = app_id_prefix.split(".", 1)
+                  bid = parts[1] if len(parts) == 2 else ""
+                  if bid in mapping:
+                      out = os.path.join(dst, mapping[bid])
+                      shutil.copy(f, out)
+                      print(f"Mapped {bid} -> {mapping[bid]}")
+              except Exception as e:
+                  print(f"skip {f}: {e}")
+          PYEOF
+          ls -la build-system/rubygram-codesigning/profiles
+      - name: Build IPA via Make.py
+        script: |
+          export BUILD_NUMBER=$(date +%s)
+          python3 build-system/Make/Make.py \
+            --cacheDir="$BAZEL_CACHE_DIR" \
+            build \
+            --configurationPath="$CONFIG_PATH" \
+            --codesigningInformationPath="build-system/rubygram-codesigning" \
+            --buildNumber="$BUILD_NUMBER" \
+            --configuration=release_arm64
+      - name: Collect and upload IPA
+        script: |
+          mkdir -p build/ipa
+          for f in bazel-out/applebin_ios-ios_arm*-opt-ST-*/bin/Telegram/Telegram.ipa; do
+            cp "$f" build/ipa/Rubygram.ipa
+          done
+          ls -la build/ipa
+          app-store-connect publish \
+            --path "build/ipa/Rubygram.ipa" \
+            --max-build-processing-wait 20 || echo "Upload skipped — App Store Connect record may not exist yet"
+    artifacts:
+      - build/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log

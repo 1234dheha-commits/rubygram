@@ -1,0 +1,15 @@
+{
+	"bundle_id": "recode.rubygram32",
+	"api_id": "37252419",
+	"api_hash": "a1a3654e6b3dfd04e81c5dcab81f2a1b",
+	"team_id": "886U954S6S",
+	"app_center_id": "0",
+	"is_internal_build": "true",
+	"is_appstore_build": "false",
+	"appstore_id": "0",
+	"app_specific_url_scheme": "rubygram",
+	"premium_iap_product_id": "",
+	"enable_siri": false,
+	"enable_icloud": false,
+	"sg_config": ""
+}
